@@ -1,0 +1,1 @@
+from .resnet_convert_from_timm import convert_from_timm
