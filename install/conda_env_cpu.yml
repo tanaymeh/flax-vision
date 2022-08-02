@@ -1,0 +1,16 @@
+name: flax_vision_cpu
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.8
+  - bumpversion
+  - conda
+  - jax
+  - jaxlib
+  - numpy
+  - pip
+  - flax
+  - optax
+  - pip:
+      - jaxtyping

@@ -1,0 +1,7 @@
+numpy
+black
+jax
+jaxlib
+flax
+optax
+jaxtyping
