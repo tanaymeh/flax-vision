@@ -1,3 +1,5 @@
+from multiprocessing import pool
+from select import select
 import jax
 import jaxlib
 import jax.numpy as jnp
@@ -16,7 +18,8 @@ POOLFORMER_DOCSTRING = r"""
     TO BE IMPLEMENTED
 """
 
-class DropPath(nn.Module):
+
+class DropPathModule(nn.Module):
     """Drop paths (Stochastic Depth) per sample (when applied in main path of residual blocks)."""
 
     def setup(self, drop_prob: float = 0.0):
@@ -32,7 +35,7 @@ class DropPath(nn.Module):
         return f"DropPath(drop_prob={self.drop_prob})"
 
 
-class Identity(nn.Module):
+class IdentityModule(nn.Module):
     """Identity module."""
 
     def call(self, x: AbstractArray) -> AbstractArray:
@@ -45,7 +48,7 @@ class Identity(nn.Module):
         return "Identity()"
 
 
-class PatchEmbeddings(nn.Module):
+class PatchEmbeddingsModule(nn.Module):
     """
     PatchEmbeddings for PoolFormer model.
     """
@@ -72,7 +75,7 @@ class PatchEmbeddings(nn.Module):
             strides=self.stride,
             padding=self.padding,
         )
-        self.norm = norm_layer(self.hidden_size) if norm_layer else Identity
+        self.norm = norm_layer(self.hidden_size) if norm_layer else IdentityModule
 
     def __call__(self, x: AbstractArray) -> AbstractArray:
         x = self.projection(x)
@@ -80,7 +83,7 @@ class PatchEmbeddings(nn.Module):
         return x
 
 
-class SingleGroupNorm(nn.GroupNorm):
+class SingleGroupNormModule(nn.GroupNorm):
     """
     1-Group GroupNorm for PoolFormer model.
     """
@@ -98,7 +101,7 @@ class SingleGroupNorm(nn.GroupNorm):
         return f"GroupNorm(num_channels={self.num_channels})"
 
 
-class Pooling(nn.Module):
+class PoolingModule(nn.Module):
     def setup(self, pool_size):
         self.pool_size = pool_size
 
@@ -109,7 +112,7 @@ class Pooling(nn.Module):
         return pooled_output - inputs
 
 
-class MLP(nn.Module):
+class MLPModule(nn.Module):
     """
     Implementation of MLP with 1x1 Convolution block
     Input: [batch_size, num_channels, height, width]
@@ -126,5 +129,111 @@ class MLP(nn.Module):
         out_features = out_features or in_features
         hidden_features = hidden_features or in_features
 
-    def __call__(self, inputs: AbstractArray) -> AbstractArray:
-        pass
+        self.fc1 = nn.Conv(hidden_features, kernel_size=1)
+        self.fc2 = nn.Conv(out_features, kernel_size=1)
+        self.act = act_layer
+        self.drop = nn.Dropout(drop)
+
+    def __call__(self, x: AbstractArray) -> AbstractArray:
+        x = self.fc1(x)
+        x = self.act(x)
+        x = self.drop(x)
+        x = self.fc2(x)
+        x = self.drop(x)
+        return x
+
+
+class PoolFormerBlockModule(nn.Module):
+    """
+    Implementation of One PoolFormer Block
+    """
+
+    def __init__(
+        self,
+        dim,
+        pool_size=3,
+        mlp_ratio=4.0,
+        act_layer=nn.gelu,
+        norm_layer=SingleGroupNormModule,
+        drop=0.0,
+        drop_path=0.0,
+        use_layer_scale=True,
+        layer_scale_init_value=1e-5,
+    ):
+        super().__init__()
+        self.norm1 = norm_layer(dim)
+        self.norm2 = norm_layer(dim)
+        self.token_mixer = PoolingModule(pool_size=pool_size)
+        mlp_hidden_features = int(dim * mlp_ratio)
+
+        self.mlp = MLPModule(
+            in_features=dim,
+            hidden_features=mlp_hidden_features,
+            act_layer=act_layer,
+            drop=drop,
+        )
+
+        self.drop_path = (
+            DropPathModule(drop_prob=drop_path) if drop_path > 0.0 else IdentityModule()
+        )
+
+        self.use_layer_scale = use_layer_scale
+        if self.use_layer_scale:
+            self.layer_scale_1 = nn.Dense(
+                layer_scale_init_value * jnp.ones((dim)), use_bias=False
+            )
+            self.layer_scale_2 = nn.Dense(
+                layer_scale_init_value * jnp.ones((dim)), use_bias=False
+            )
+
+    def __call__(self, x: AbstractArray) -> AbstractArray:
+        # Haven't figured out how to expand dimensions of a Flax Layer so training is not available
+        x = x + self.drop_path(self.token_mixer(self.norm1(x)))
+        x = x + self.drop_path(self.mlp(self.norm2(x)))
+
+        return x
+
+
+def basic_blocks(
+    dim,
+    index,
+    layers,
+    pool_size=3,
+    mlp_ratio=4.0,
+    act_layer=nn.gelu,
+    norm_layer=SingleGroupNormModule,
+    drop_rate=0.0,
+    drop_path_ratio=0.0,
+    use_layer_scale=True,
+    layer_scale_init_value=1e-5,
+):
+    """
+    Generate PoolFormer blocks for a single stage
+    """
+    blocks = []
+    for block_idx in range(layers[index]):
+        block_dpr = (
+            drop_path_ratio * (block_idx + sum(layers[:index])) / (sum(layers) - 1)
+        )
+        blocks.append(
+            PoolFormerBlockModule(
+                dim,
+                pool_size=pool_size,
+                mlp_ratio=mlp_ratio,
+                act_layer=act_layer,
+                norm_layer=norm_layer,
+                drop=drop_rate,
+                drop_path=block_dpr,
+                use_layer_scale=use_layer_scale,
+                layer_scale_init_value=layer_scale_init_value,
+            )
+        )
+    blocks = nn.Sequential(*blocks)
+    return blocks
+
+
+class PoolFormer(nn.Module):
+    """
+    Main class for the model
+    """
+    pass
