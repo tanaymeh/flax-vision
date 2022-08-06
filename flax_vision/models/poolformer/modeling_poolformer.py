@@ -1,5 +1,3 @@
-from multiprocessing import pool
-from select import select
 import jax
 import jaxlib
 import jax.numpy as jnp
@@ -12,6 +10,7 @@ import flax.linen as nn
 from flax.serialization import to_bytes, from_bytes
 
 from utils.decorators import add_start_doctring
+from utils.general import to_2tuple
 from utils.model_utils import drop_path, avg_pool, batch_norm
 
 POOLFORMER_DOCSTRING = r"""
@@ -48,29 +47,23 @@ class IdentityModule(nn.Module):
         return "Identity()"
 
 
-class PatchEmbeddingsModule(nn.Module):
+class PatchEmbeddingModule(nn.Module):
     """
-    PatchEmbeddings for PoolFormer model.
+    Patch Embedding that is implemented by a layer of conv.
+    Input: tensor in shape [B, C, H, W]
+    Output: tensor in shape [B, C, H/stride, W/stride]
     """
 
     def setup(
-        self,
-        hidden_size: int,
-        num_channels: int,
-        patch_size: tuple,
-        stride: tuple,
-        padding: tuple,
-        norm_layer=None,
+        self, patch_size=16, stride=16, padding=0, embed_dim=768, norm_layer=None
     ):
-        self.hidden_size = hidden_size
-        self.num_channels = num_channels
-        self.patch_size = patch_size
-        self.stride = stride
-        self.padding = padding
-        self.norm_layer = norm_layer
+        super().__init__()
+        patch_size = to_2tuple(patch_size)
+        stride = to_2tuple(stride)
+        padding = to_2tuple(padding)
 
-        self.projection = nn.Conv(
-            features=self.hidden_size,
+        self.proj = nn.Conv(
+            features=embed_dim,
             kernel_size=self.patch_size,
             strides=self.stride,
             padding=self.padding,
@@ -78,7 +71,7 @@ class PatchEmbeddingsModule(nn.Module):
         self.norm = norm_layer(self.hidden_size) if norm_layer else IdentityModule
 
     def __call__(self, x: AbstractArray) -> AbstractArray:
-        x = self.projection(x)
+        x = self.proj(x)
         x = self.norm(x)
         return x
 
@@ -236,4 +229,37 @@ class PoolFormer(nn.Module):
     """
     Main class for the model
     """
-    pass
+
+    def setup(
+        self,
+        layers,
+        embed_dims=None,
+        mlp_ratio=None,
+        downsamples=None,
+        pool_size=3,
+        norm_layer=SingleGroupNormModule,
+        act_layer=nn.gelu,
+        num_classes=1000,
+        in_patch_size=7,
+        in_stride=4,
+        in_pad=2,
+        down_patch_size=3,
+        down_stride=2,
+        down_pad=1,
+        drop_rate=0.0,
+        drop_path_rate=0.0,
+        use_layer_scale=True,
+        layer_scale_init_value=1e-5,
+        fork_feat=False,
+        init_cfg=None,
+        pretrained=None,
+        **kwargs,
+    ):
+        super().__init__()
+        if not fork_feat:
+            self.num_classes = num_classes
+        self.fork_feat = fork_feat
+
+        self.patch_embed = PatchEmbeddingModule(
+            patch_size=16, stride=16, padding=0, embed_dim=768, norm_layer=None
+        )
