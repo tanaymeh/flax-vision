@@ -1,13 +1,14 @@
+from ast import Call
+from typing_extensions import Self
 import jax
 import jaxlib
 import jax.numpy as jnp
 from jaxtyping import AbstractArray
 
-from typing import Union
+from typing import Union, Optional, Callable
 
 import flax
 import flax.linen as nn
-from flax.serialization import to_bytes, from_bytes
 
 from utils.decorators import add_start_doctring
 from utils.general import to_2tuple
@@ -21,27 +22,18 @@ POOLFORMER_DOCSTRING = r"""
 class DropPathModule(nn.Module):
     """Drop paths (Stochastic Depth) per sample (when applied in main path of residual blocks)."""
 
-    def setup(self, drop_prob: float = 0.0):
-        self.drop_prob = drop_prob
+    drop_prob: float
 
-    def call(self, x: AbstractArray, key: AbstractArray) -> AbstractArray:
-        return drop_path(x, key, self.drop_prob)
-
+    @nn.compact
     def __call__(self, x: AbstractArray, key: AbstractArray) -> AbstractArray:
-        return self.call(x, key)
-
-    def __repr__(self):
-        return f"DropPath(drop_prob={self.drop_prob})"
+        return drop_path(x, key, self.drop_prob)
 
 
 class IdentityModule(nn.Module):
     """Identity module."""
 
-    def call(self, x: AbstractArray) -> AbstractArray:
-        return x
-
     def __call__(self, x: AbstractArray) -> AbstractArray:
-        return self.call(x)
+        return x
 
     def __repr__(self):
         return "Identity()"
@@ -54,49 +46,45 @@ class PatchEmbeddingModule(nn.Module):
     Output: tensor in shape [B, C, H/stride, W/stride]
     """
 
-    def setup(
-        self, patch_size=16, stride=16, padding=0, embed_dim=768, norm_layer=None
-    ):
-        super().__init__()
-        patch_size = to_2tuple(patch_size)
-        stride = to_2tuple(stride)
-        padding = to_2tuple(padding)
+    patch_size: Optional[tuple] = to_2tuple(16)
+    stride: Optional[tuple] = to_2tuple(16)
+    padding: Optional[tuple] = to_2tuple(0)
+    embed_dim: Optional[int] = 768
+    norm_layer: Optional[Callable] = None
 
+    @nn.compact
+    def __call__(self, x: AbstractArray) -> AbstractArray:
         self.proj = nn.Conv(
-            features=embed_dim,
+            features=self.embed_dim,
             kernel_size=self.patch_size,
             strides=self.stride,
             padding=self.padding,
         )
-        self.norm = norm_layer(self.hidden_size) if norm_layer else IdentityModule
+        self.norm = (
+            self.norm_layer(self.hidden_size) if self.norm_layer else IdentityModule
+        )
 
-    def __call__(self, x: AbstractArray) -> AbstractArray:
         x = self.proj(x)
         x = self.norm(x)
         return x
 
 
-class SingleGroupNormModule(nn.GroupNorm):
+class GroupNormModule(nn.GroupNorm):
     """
     1-Group GroupNorm for PoolFormer model.
     """
 
-    def setup(self, num_channels: int):
+    def setup(self, num_channels):
+        super().setup(num_channels)
         self.num_channels = num_channels
 
-    def call(self, x: AbstractArray) -> AbstractArray:
-        return nn.GroupNorm(self.num_channels, 1)(x)
-
+    @nn.compact
     def __call__(self, x: AbstractArray) -> AbstractArray:
-        return self.call(x)
-
-    def __repr__(self):
-        return f"GroupNorm(num_channels={self.num_channels})"
+        return nn.GroupNorm(self.num_channels, 1)(x)
 
 
 class PoolingModule(nn.Module):
-    def setup(self, pool_size):
-        self.pool_size = pool_size
+    pool_size: Optional[int] = to_2tuple(16)
 
     def __call__(self, inputs: AbstractArray) -> AbstractArray:
         pooled_output = avg_pool(
@@ -111,23 +99,22 @@ class MLPModule(nn.Module):
     Input: [batch_size, num_channels, height, width]
     """
 
-    def setup(
-        self,
-        in_features: AbstractArray,
-        hidden_features=None,
-        out_features=None,
-        act_layer=nn.gelu,
-        drop=0.0,
-    ):
-        out_features = out_features or in_features
-        hidden_features = hidden_features or in_features
+    in_features: AbstractArray
+    hidden_features: Optional[AbstractArray] = None
+    out_features: Optional[AbstractArray] = None
+    act_layer: Optional[Callable] = nn.gelu
+    drop: float = 0.0
 
-        self.fc1 = nn.Conv(hidden_features, kernel_size=1)
-        self.fc2 = nn.Conv(out_features, kernel_size=1)
-        self.act = act_layer
-        self.drop = nn.Dropout(drop)
-
+    @nn.compact
     def __call__(self, x: AbstractArray) -> AbstractArray:
+        out_features = self.out_features or self.in_features
+        hidden_features = self.hidden_features or self.in_features
+
+        self.fc1 = nn.Conv(self.hidden_features, kernel_size=1)
+        self.fc2 = nn.Conv(self.out_features, kernel_size=1)
+        self.act = self.act_layer
+        self.drop = nn.Dropout(self.drop)
+
         x = self.fc1(x)
         x = self.act(x)
         x = self.drop(x)
@@ -147,7 +134,7 @@ class PoolFormerBlockModule(nn.Module):
         pool_size=3,
         mlp_ratio=4.0,
         act_layer=nn.gelu,
-        norm_layer=SingleGroupNormModule,
+        norm_layer=GroupNormModule,
         drop=0.0,
         drop_path=0.0,
         use_layer_scale=True,
@@ -194,7 +181,7 @@ def basic_blocks(
     pool_size=3,
     mlp_ratio=4.0,
     act_layer=nn.gelu,
-    norm_layer=SingleGroupNormModule,
+    norm_layer=GroupNormModule,
     drop_rate=0.0,
     drop_path_ratio=0.0,
     use_layer_scale=True,
@@ -232,34 +219,68 @@ class PoolFormer(nn.Module):
 
     def setup(
         self,
-        layers,
-        embed_dims=None,
-        mlp_ratio=None,
-        downsamples=None,
-        pool_size=3,
-        norm_layer=SingleGroupNormModule,
-        act_layer=nn.gelu,
-        num_classes=1000,
-        in_patch_size=7,
-        in_stride=4,
-        in_pad=2,
-        down_patch_size=3,
-        down_stride=2,
-        down_pad=1,
-        drop_rate=0.0,
-        drop_path_rate=0.0,
-        use_layer_scale=True,
-        layer_scale_init_value=1e-5,
-        fork_feat=False,
-        init_cfg=None,
-        pretrained=None,
+        layers: list,
+        embed_dims: Optional[tuple] = None,
+        mlp_ratios: Optional[list] = None,
+        downsamples: Optional[list] = None,
+        pool_size: Optional[int] = 3,
+        norm_layer: Optional[Callable] = GroupNormModule,
+        act_layer: Optional[Callable] = nn.gelu,
+        num_classes: Optional[int] = 1000,
+        in_patch_size: Optional[int] = 7,
+        in_stride: Optional[int] = 4,
+        in_pad: Optional[int] = 2,
+        down_patch_size: Optional[int] = 3,
+        down_stride: Optional[int] = 2,
+        down_pad: Optional[int] = 1,
+        drop_rate: Optional[float] = 0.0,
+        drop_path_rate: Optional[float] = 0.0,
+        use_layer_scale: Optional[bool] = True,
+        layer_scale_init_value: Optional[float] = 1e-5,
+        pretrained: Optional[Union[str, bool]] = None,
         **kwargs,
     ):
         super().__init__()
-        if not fork_feat:
-            self.num_classes = num_classes
-        self.fork_feat = fork_feat
+        self.num_classes = num_classes
 
         self.patch_embed = PatchEmbeddingModule(
-            patch_size=16, stride=16, padding=0, embed_dim=768, norm_layer=None
+            patch_size=in_patch_size,
+            stride=in_stride,
+            padding=in_pad,
+            embed_dim=embed_dims[0],
+        )
+
+        # Main Block
+        network = []
+        for i in range(len(layers)):
+            stage = basic_blocks(
+                embed_dims[i],
+                i,
+                layers,
+                pool_size=pool_size,
+                mlp_ratio=mlp_ratios[i],
+                act_layer=act_layer,
+                norm_layer=norm_layer,
+                drop_rate=drop_rate,
+                drop_path_rate=drop_path_rate,
+                use_layer_scale=use_layer_scale,
+                layer_scale_init_value=layer_scale_init_value,
+            )
+            network.append(stage)
+            if i >= len(layers) - 1:
+                break
+            if downsamples[i] or embed_dims[i] != embed_dims[i + 1]:
+                # downsampling between two stages
+                network.append(
+                    PatchEmbeddingModule(
+                        patch_size=down_patch_size,
+                        stride=down_stride,
+                        padding=down_pad,
+                        embed_dim=embed_dims[i + 1],
+                    )
+                )
+        # Classifier Head
+        self.norm = norm_layer(embed_dims[-1])
+        self.head = nn.Dense(
+            self.num_classes,
         )
