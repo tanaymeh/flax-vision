@@ -1,5 +1,4 @@
-from ast import Call
-from typing_extensions import Self
+from tabnanny import check
 import jax
 import jaxlib
 import jax.numpy as jnp
@@ -10,9 +9,22 @@ from typing import Union, Optional, Callable
 import flax
 import flax.linen as nn
 
+from utils.general import to_2tuple, register_model
 from utils.decorators import add_start_doctring
-from utils.general import to_2tuple
+from utils.serialization import (
+    load_weights,
+    download_checkpoint,
+)
 from utils.model_utils import drop_path, avg_pool, batch_norm
+
+__all__ = [
+    "poolformer_s12",
+    "poolformer_s24",
+    "poolformer_s36",
+    "poolformer_m36",
+    "poolformer_m48",
+]
+
 
 POOLFORMER_DOCSTRING = r"""
     TO BE IMPLEMENTED
@@ -214,7 +226,7 @@ def basic_blocks(
 
 class PoolFormer(nn.Module):
     """
-    Main class for the model
+    Class that builds the PoolFormer model from the Blocks
     """
 
     def setup(
@@ -237,7 +249,6 @@ class PoolFormer(nn.Module):
         drop_path_rate: Optional[float] = 0.0,
         use_layer_scale: Optional[bool] = True,
         layer_scale_init_value: Optional[float] = 1e-5,
-        pretrained: Optional[Union[str, bool]] = None,
         **kwargs,
     ):
         super().__init__()
@@ -251,7 +262,7 @@ class PoolFormer(nn.Module):
         )
 
         # Main Block
-        network = []
+        self.network = []
         for i in range(len(layers)):
             stage = basic_blocks(
                 embed_dims[i],
@@ -266,12 +277,12 @@ class PoolFormer(nn.Module):
                 use_layer_scale=use_layer_scale,
                 layer_scale_init_value=layer_scale_init_value,
             )
-            network.append(stage)
+            self.network.append(stage)
             if i >= len(layers) - 1:
                 break
             if downsamples[i] or embed_dims[i] != embed_dims[i + 1]:
                 # downsampling between two stages
-                network.append(
+                self.network.append(
                     PatchEmbeddingModule(
                         patch_size=down_patch_size,
                         stride=down_stride,
@@ -281,6 +292,48 @@ class PoolFormer(nn.Module):
                 )
         # Classifier Head
         self.norm = norm_layer(embed_dims[-1])
-        self.head = nn.Dense(
-            self.num_classes,
-        )
+        self.head = nn.Dense(self.num_classes)
+
+    def _forward_embeddings(self, x: AbstractArray) -> AbstractArray:
+        return self.patch_embed(x)
+
+    def __call__(self, x: AbstractArray) -> AbstractArray:
+        x = self._forward_embeddings(x)
+        for idx, block in enumerate(self.network):
+            x = block(x)
+
+        x = self.norm(x)
+        x = self.head(x)
+        return x
+
+    def _init_weights(self):
+        pass
+
+
+@register_model
+def poolformer_s12(
+    num_classes: Optional[int] = 1000,
+    dropout: Optional[float] = 0.1,
+    pretrained: Optional[bool] = False,
+    **kwargs,
+):
+    model_name = "poolformer_s12"
+    layers = ([2, 2, 6, 2],)
+    embed_dims = [64, 128, 320, 512]
+    mlp_ratios = [4, 4, 4, 4]
+    downsamples = [True, True, True, True]
+    model = PoolFormer(
+        layers,
+        embed_dims=embed_dims,
+        mlp_ratios=mlp_ratios,
+        downsamples=downsamples,
+        num_classes=num_classes,
+        drop_rate=dropout,
+        **kwargs,
+    )
+    if pretrained:
+        checkpoint_loc = download_checkpoint(model_name)
+        params = load_weights(checkpoint_loc)
+        return model, params
+    
+    return model

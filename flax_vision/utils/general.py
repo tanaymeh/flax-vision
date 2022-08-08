@@ -1,5 +1,11 @@
+import fname
+import re
 from itertools import repeat
 import collections.abc
+
+__all__ = ["to_2tuple", "register_model", "list_models"]
+
+model_dict = {}
 
 
 def _ntuple(n):
@@ -13,6 +19,16 @@ def _ntuple(n):
         return tuple(repeat(x, n))
 
     return parse
+
+
+def register_model(fn):
+    name = ("_", "-", fn.__name__.lower())
+    model_dict[name] = fn
+    return fn
+
+
+def list_models():
+    pass
 
 
 to_2tuple = _ntuple(2)
