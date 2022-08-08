@@ -318,7 +318,7 @@ def poolformer_s12(
     **kwargs,
 ):
     model_name = "poolformer_s12"
-    layers = ([2, 2, 6, 2],)
+    layers = [2, 2, 6, 2]
     embed_dims = [64, 128, 320, 512]
     mlp_ratios = [4, 4, 4, 4]
     downsamples = [True, True, True, True]
@@ -335,5 +335,121 @@ def poolformer_s12(
         checkpoint_loc = download_checkpoint(model_name)
         params = load_weights(checkpoint_loc)
         return model, params
-    
+
+    return model
+
+
+@register_model
+def poolformer_s24(
+    num_classes: Optional[int] = 1000,
+    dropout: Optional[float] = 0.1,
+    pretrained: Optional[bool] = False,
+    **kwargs,
+):
+    model_name = "poolformer_s24"
+    layers = [4, 4, 12, 4]
+    embed_dims = [64, 128, 320, 512]
+    mlp_ratios = [4, 4, 4, 4]
+    downsamples = [True, True, True, True]
+    model = PoolFormer(
+        layers,
+        embed_dims=embed_dims,
+        mlp_ratios=mlp_ratios,
+        downsamples=downsamples,
+        num_classes=num_classes,
+        drop_rate=dropout,
+        **kwargs,
+    )
+    if pretrained:
+        checkpoint_loc = download_checkpoint(model_name)
+        params = load_weights(checkpoint_loc)
+        return model, params
+
+    return model
+
+
+@register_model
+def poolformer_s36(
+    num_classes: Optional[int] = 1000,
+    dropout: Optional[float] = 0.1,
+    pretrained: Optional[bool] = False,
+    **kwargs,
+):
+    model_name = "poolformer_s36"
+    layers = [6, 6, 18, 6]
+    embed_dims = [64, 128, 320, 512]
+    mlp_ratios = [4, 4, 4, 4]
+    downsamples = [True, True, True, True]
+    model = PoolFormer(
+        layers,
+        embed_dims=embed_dims,
+        mlp_ratios=mlp_ratios,
+        downsamples=downsamples,
+        num_classes=num_classes,
+        drop_rate=dropout,
+        **kwargs,
+    )
+    if pretrained:
+        checkpoint_loc = download_checkpoint(model_name)
+        params = load_weights(checkpoint_loc)
+        return model, params
+
+    return model
+
+
+@register_model
+def poolformer_m36(
+    num_classes: Optional[int] = 1000,
+    dropout: Optional[float] = 0.1,
+    pretrained: Optional[bool] = False,
+    **kwargs,
+):
+    model_name = "poolformer_m36"
+    layers = [6, 6, 18, 6]
+    embed_dims = [96, 192, 384, 768]
+    mlp_ratios = [4, 4, 4, 4]
+    downsamples = [True, True, True, True]
+    model = PoolFormer(
+        layers,
+        embed_dims=embed_dims,
+        mlp_ratios=mlp_ratios,
+        downsamples=downsamples,
+        num_classes=num_classes,
+        drop_rate=dropout,
+        **kwargs,
+    )
+    if pretrained:
+        checkpoint_loc = download_checkpoint(model_name)
+        params = load_weights(checkpoint_loc)
+        return model, params
+
+    return model
+
+
+@register_model
+def poolformer_m48(
+    num_classes: Optional[int] = 1000,
+    dropout: Optional[float] = 0.1,
+    pretrained: Optional[bool] = False,
+    **kwargs,
+):
+    model_name = "poolformer_m48"
+    layers = [8, 8, 24, 8]
+    embed_dims = [96, 192, 384, 768]
+    mlp_ratios = [4, 4, 4, 4]
+    downsamples = [True, True, True, True]
+    model = PoolFormer(
+        layers,
+        embed_dims=embed_dims,
+        mlp_ratios=mlp_ratios,
+        downsamples=downsamples,
+        num_classes=num_classes,
+        drop_rate=dropout,
+        **kwargs,
+    )
+    if pretrained:
+        checkpoint_loc = download_checkpoint(model_name)
+        params = load_weights(checkpoint_loc)
+        return model, params
+
     return model
