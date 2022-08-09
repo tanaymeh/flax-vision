@@ -1,4 +1,3 @@
-from tabnanny import check
 import jax
 import jaxlib
 import jax.numpy as jnp
