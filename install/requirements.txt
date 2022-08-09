@@ -5,3 +5,4 @@ jaxlib
 flax
 optax
 jaxtyping
+pytest

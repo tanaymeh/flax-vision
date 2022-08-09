@@ -9,8 +9,8 @@ from typing import Union, Optional, Callable
 import flax
 import flax.linen as nn
 
-from utils.general import to_2tuple, register_model
-from utils.decorators import add_start_doctring
+from utils.general import to_2tuple
+from utils.decorators import add_start_doctring, register_model
 from utils.serialization import (
     load_weights,
     download_checkpoint,

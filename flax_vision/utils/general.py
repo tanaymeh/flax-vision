@@ -21,12 +21,6 @@ def _ntuple(n):
     return parse
 
 
-def register_model(fn):
-    name = ("_", "-", fn.__name__.lower())
-    model_dict[name] = fn
-    return fn
-
-
 def list_models():
     pass
 
